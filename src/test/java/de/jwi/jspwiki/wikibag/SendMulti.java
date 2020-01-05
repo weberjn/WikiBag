@@ -1,7 +1,6 @@
 package de.jwi.jspwiki.wikibag;
 
 import java.io.File;
-import java.io.IOException;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;

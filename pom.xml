@@ -9,7 +9,7 @@
 	<packaging>jar</packaging>
 
 	<name>WikiBag</name>
-	<url>http://jspwiki.apache.org/</url>
+	<url>https://github.com/weberjn/WikiBag</url>
 
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -57,16 +57,6 @@
 			<scope>test</scope>
 		</dependency>
 
-
-
 	</dependencies>
-
-	<!--build> <plugins> <plugin> <artifactId>maven-resources-plugin</artifactId> 
-		<version>3.0.2</version> <executions> <execution> <id>copy-resources</id> 
-		<phase>verify</phase> <goals> <goal>copy-resources</goal> </goals> <configuration> 
-		<outputDirectory>N:/sl_projekte/JSPWiki/JSPWiki-2.10.4/WEB-INF/lib</outputDirectory> 
-		<resources> <resource> <directory>${basedir}/target</directory> <includes>${project.build.finalName}.jar</includes> 
-		</resource> </resources> </configuration> </execution> </executions> </plugin> 
-		</plugins> </build -->
 
 </project>
