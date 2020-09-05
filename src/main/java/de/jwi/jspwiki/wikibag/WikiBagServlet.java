@@ -20,6 +20,9 @@ package de.jwi.jspwiki.wikibag;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PrintWriter;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.security.Principal;
 import java.text.MessageFormat;
 import java.util.Base64;
@@ -44,6 +47,7 @@ import org.apache.wiki.api.exceptions.WikiException;
 import org.apache.wiki.attachment.Attachment;
 import org.apache.wiki.auth.AuthenticationManager;
 import org.apache.wiki.auth.AuthorizationManager;
+import org.apache.wiki.auth.WikiSecurityException;
 import org.apache.wiki.auth.permissions.PermissionFactory;
 
 public class WikiBagServlet extends HttpServlet
@@ -69,7 +73,7 @@ public class WikiBagServlet extends HttpServlet
 	public void init(ServletConfig config) throws ServletException
 	{
 		wikiEngine = WikiEngine.getInstance(config);
-
+		
 		Properties wikiProperties = wikiEngine.getWikiProperties();
 
 		pageName = wikiProperties.getProperty("de.jwi.WikiBag.page", DEFAULT_PAGE);
@@ -83,14 +87,24 @@ public class WikiBagServlet extends HttpServlet
 		s = wikiProperties.getProperty("de.jwi.WikiBag.attachmentTemplate", DEFAULT_ATTACHMENT_TEMPLATE);
 
 		attachmentFormat = MessageFormatFactory.createMessageFormat(s);
+		
+		boolean containerAuthenticated = wikiEngine.getAuthenticationManager().isContainerAuthenticated();		
+		log.info("containerAuthenticated: " + containerAuthenticated);
 	}
 
 	@Override
 	public void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException
 	{
-		String msg = WikiBagServlet.class.getSimpleName() + " is alive.";
-
-		response.getWriter().print(msg);
+		String s = request.getContextPath() + request.getServletPath();
+		PrintWriter out = response.getWriter();
+		out.print("<html><body>");
+		out.print("Wikibag: <p>");
+		out.print("<form action='" + s + "' method='post'>");
+		out.print("text: <input type='text' name='text' /> <p>");
+		out.print("user: <input type='text' name='user' /> <p>");  
+		out.print("pass: <input type='password ' name='password' /> <p>");  
+		out.print("<input type='submit' value='post' />");  
+		out.print("</form></body></html>");  				
 	}
 
 	@Override
@@ -98,14 +112,9 @@ public class WikiBagServlet extends HttpServlet
 	{
 		try
 		{
-			String pathInfo = request.getPathInfo();
-
-			log.info("doPost: " + pathInfo);
-
-			String text = request.getParameter("text");
-
-			log.info("doPost: text=" + text);
-
+			String userp = request.getParameter("user");
+			String passwordp = request.getParameter("password");
+			
 			WikiPage page = wikiEngine.getPage(pageName);
 
 			if (page == null)
@@ -113,35 +122,63 @@ public class WikiBagServlet extends HttpServlet
 				page = new WikiPage(wikiEngine, pageName);
 			}
 
-			String[] up = parseUserPassword(request);
+			String[] up = {userp, passwordp};
+			
+			if (userp ==null || passwordp == null)
+			{
+				up = parseUserPassword(request);
+			}
+			
 
 			AuthenticationManager authenticationManager = wikiEngine.getAuthenticationManager();
 
 			if (authenticationManager.isContainerAuthenticated())
 			{
-				request.login(up[0], up[1]);
+				String remoteUser = request.getRemoteUser();
+				try {
+					request.login(up[0], up[1]);
+				} catch (ServletException e) {
+					log.info("login failed for " + up[0], e);
+					throw new WikiSecurityException("Authentication failed");
+				}
 			}
 			
-			WikiContext context = null;
+			WikiContext context = new WikiContext(wikiEngine, request, page);
 
-			context = new WikiContext(wikiEngine, request, page);
-
-			boolean loginOK;
-
+			boolean loginOK = false;
+			
 			if (authenticationManager.isContainerAuthenticated())
 			{
-				authenticationManager.login(request);
-			} else
+				// checks for container authenticated request
+				
+				loginOK = authenticationManager.login(request);
+				// always false, Bug
+			}
+			else
 			{
 				WikiSession wikiSession = context.getWikiSession();
 
-				authenticationManager.login(wikiSession, request, up[0], up[1]);
+				// this always authenticates against UserDatabaseLoginModule
+				loginOK = authenticationManager.login(wikiSession, request, up[0], up[1]);
+				if (!loginOK)
+				{
+					log.info("Authentication failed for: " + up[0]);
+					throw new WikiSecurityException("Authentication failed");
+				}
 			}
+			
+			
 
-//			log.info("loginOK: " + loginOK);
-//
+//			WikiContext context = new WikiContext(wikiEngine, request, page);
+//			
+//			WikiSession wikiSession = context.getWikiSession();
+//			
+//			AuthenticationManager authenticationManager = wikiEngine.getAuthenticationManager();
+//			
+//			boolean loginOK = authenticationManager.login(wikiSession, request, up[0], up[1]);
 //			if (!loginOK)
 //			{
+//				log.info("Authentication failed for: " + up[0]);
 //				throw new WikiSecurityException("Authentication failed");
 //			}
 
@@ -152,7 +189,8 @@ public class WikiBagServlet extends HttpServlet
 
 			if (!isAllowed)
 			{
-				throw new ServletException("no edit permission");
+				log.info("no edit permission for: " + up[0]);
+				throw new WikiSecurityException("no edit permission");
 			}
 
 			Principal user = context.getCurrentUser();
@@ -176,19 +214,32 @@ public class WikiBagServlet extends HttpServlet
 					String content = attachmentFormat.format(messageArgs);
 					addContent(context, content);
 				}
-			} else
+			} 
+			else
 			{
+				String charset = request.getCharacterEncoding() != null ? request.getCharacterEncoding() : StandardCharsets.ISO_8859_1.name();
+				
+				String text = request.getParameter("text");
+
+				text = URLDecoder.decode(text, charset);
+				log.info("doPost: text=" + text);
+				
 				Object[] messageArgs = { text, new Date() };
 				String content = textFormat.format(messageArgs);
 				addContent(context, content);
 			}
-		} catch (WikiException e)
+		} 
+		catch (WikiSecurityException e)
+		{
+			response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
+		}
+		catch (WikiException e)
 		{
 			throw new ServletException(e);
 		}
 	}
 
-	private String[] parseUserPassword(HttpServletRequest request) throws ServletException
+	private String[] parseUserPassword(HttpServletRequest request) throws WikiSecurityException
 	{
 		String authHeader = request.getHeader("Authorization");
 
@@ -196,7 +247,7 @@ public class WikiBagServlet extends HttpServlet
 
 		if (authHeader == null || !authHeader.startsWith(BASIC_PREFIX))
 		{
-			throw new ServletException("Require Basic Auth");
+			throw new WikiSecurityException("Require Basic Auth");
 		}
 
 		String userPassBase64 = authHeader.substring(BASIC_PREFIX.length());

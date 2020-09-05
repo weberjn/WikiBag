@@ -7,6 +7,7 @@ import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
@@ -17,12 +18,15 @@ public class SendPlainTest
 	{
 		URL url = new URL(WikiData.URL);
 
-		String text = "some String";
+		String text = "Ísland Straße Mädchen ça va résoudre les problèmes";
 
+		Charset charset = StandardCharsets.UTF_8;
+//		Charset charset = StandardCharsets.ISO_8859_1;
+		
 		StringBuilder params = new StringBuilder("text=");
-		params.append(URLEncoder.encode(text, StandardCharsets.UTF_8.name()));
+		params.append(URLEncoder.encode(text, charset.name()));
 
-		String authorization = Base64.getEncoder().encodeToString((WikiData.UserPass).getBytes(StandardCharsets.UTF_8));  
+		String authorization = Base64.getEncoder().encodeToString((WikiData.UserPass).getBytes(charset));  
 
 		HttpURLConnection connection = (HttpURLConnection) url.openConnection();
 
@@ -32,11 +36,14 @@ public class SendPlainTest
 		
 		
 		connection.setRequestMethod("POST");
-		connection.setRequestProperty("Accept-Language", StandardCharsets.UTF_8.name());
+		connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset="+charset.name());
+		connection.setRequestProperty("Content-Length", "" + params.length());  
 		connection.setDoOutput(true);
 
 		OutputStreamWriter outputStreamWriter = new OutputStreamWriter(connection.getOutputStream());
+		
 		outputStreamWriter.write(params.toString());
+		
 		outputStreamWriter.flush();
 
 		String line;
