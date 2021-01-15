@@ -92,6 +92,21 @@ public class MessageFormatTest {
 	}
 
 	@Test
+	public void urlDefault() {
+		String pattern = WikiBagServlet.DEFAULT_URL_TEMPLATE;
+		MessageFormat mf = MessageFormatFactory.createMessageFormat(pattern);
+
+		Object[] messageArgs = { "X", "Y", "Z" };
+		String m = mf.format(messageArgs);
+
+		String defaultresult = p.getProperty("urldefaultresult");
+		
+		
+		Assert.assertEquals(defaultresult, m);
+
+	}
+
+	@Test
 	public void attachmentDefault() {
 		String pattern = WikiBagServlet.DEFAULT_ATTACHMENT_TEMPLATE;
 		MessageFormat mf = MessageFormatFactory.createMessageFormat(pattern);

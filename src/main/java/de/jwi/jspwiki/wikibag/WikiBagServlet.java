@@ -58,12 +58,16 @@ public class WikiBagServlet extends HttpServlet
 	private WikiEngine wikiEngine;
 
 	private MessageFormat textFormat;
+	
+	private MessageFormat urlFormat;
 
 	private MessageFormat attachmentFormat;
 
 	static final String DEFAULT_PAGE = "WikiBag";
 
 	static final String DEFAULT_TEXT_TEMPLATE = "{0}\\\\\n{1}\n----\n";
+	
+	static final String DEFAULT_URL_TEMPLATE =  "{0}\\\\\n[{1}]\\\\\n{2}\n----\n";
 
 	static final String DEFAULT_ATTACHMENT_TEMPLATE = "[{0}]\\\\\\n{1}\\n----\\n";
 
@@ -72,18 +76,22 @@ public class WikiBagServlet extends HttpServlet
 	@Override
 	public void init(ServletConfig config) throws ServletException
 	{
+		String s; 
+		
 		wikiEngine = WikiEngine.getInstance(config);
 		
 		Properties wikiProperties = wikiEngine.getWikiProperties();
 
 		pageName = wikiProperties.getProperty("de.jwi.WikiBag.page", DEFAULT_PAGE);
 
-		String s =
-
-				wikiProperties.getProperty("de.jwi.WikiBag.textTemplate", DEFAULT_TEXT_TEMPLATE);
+		s =	wikiProperties.getProperty("de.jwi.WikiBag.textTemplate", DEFAULT_TEXT_TEMPLATE);
 
 		textFormat = MessageFormatFactory.createMessageFormat(s);
 
+		s = wikiProperties.getProperty("de.jwi.WikiBag.urlTemplate", DEFAULT_URL_TEMPLATE);
+
+		urlFormat = MessageFormatFactory.createMessageFormat(s);
+		
 		s = wikiProperties.getProperty("de.jwi.WikiBag.attachmentTemplate", DEFAULT_ATTACHMENT_TEMPLATE);
 
 		attachmentFormat = MessageFormatFactory.createMessageFormat(s);
@@ -217,15 +225,30 @@ public class WikiBagServlet extends HttpServlet
 			} 
 			else
 			{
+				String content; 
+				
 				String charset = request.getCharacterEncoding() != null ? request.getCharacterEncoding() : StandardCharsets.ISO_8859_1.name();
 				
 				String text = request.getParameter("text");
 
 				text = URLDecoder.decode(text, charset);
 				log.info("doPost: text=" + text);
-				
-				Object[] messageArgs = { text, new Date() };
-				String content = textFormat.format(messageArgs);
+
+				if (text.startsWith("http://") || text.startsWith("https://"))
+				{
+					String subject = request.getParameter("subject");
+					log.info("doPost: subject=" + subject);
+
+					subject = subject != null ? subject : "";
+					
+					Object[] messageArgs = { subject, text, new Date() };
+					content = urlFormat.format(messageArgs);
+				}
+				else
+				{
+					Object[] messageArgs = { text, new Date() };
+					content = textFormat.format(messageArgs);
+				}
 				addContent(context, content);
 			}
 		} 
