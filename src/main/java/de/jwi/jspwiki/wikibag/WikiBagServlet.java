@@ -37,23 +37,26 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.Part;
 
-import org.apache.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.wiki.WikiContext;
 import org.apache.wiki.WikiEngine;
-import org.apache.wiki.WikiPage;
 import org.apache.wiki.WikiSession;
+import org.apache.wiki.api.core.Attachment;
+import org.apache.wiki.api.core.Page;
 import org.apache.wiki.api.exceptions.ProviderException;
 import org.apache.wiki.api.exceptions.WikiException;
-import org.apache.wiki.attachment.Attachment;
+import org.apache.wiki.api.spi.Wiki;
+import org.apache.wiki.attachment.AttachmentManager;
 import org.apache.wiki.auth.AuthenticationManager;
 import org.apache.wiki.auth.AuthorizationManager;
 import org.apache.wiki.auth.WikiSecurityException;
 import org.apache.wiki.auth.permissions.PermissionFactory;
+import org.apache.wiki.pages.PageManager;
 
 public class WikiBagServlet extends HttpServlet
 {
-
-	static Logger log = Logger.getLogger(WikiBagServlet.class);
+	private static final Logger log = LogManager.getLogger(WikiBagServlet.class);
 
 	private WikiEngine wikiEngine;
 
@@ -96,7 +99,9 @@ public class WikiBagServlet extends HttpServlet
 
 		attachmentFormat = MessageFormatFactory.createMessageFormat(s);
 		
-		boolean containerAuthenticated = wikiEngine.getAuthenticationManager().isContainerAuthenticated();		
+		AuthenticationManager authenticationManager = wikiEngine.getManager(AuthenticationManager.class);
+		
+		boolean containerAuthenticated = authenticationManager.isContainerAuthenticated();		
 		log.info("containerAuthenticated: " + containerAuthenticated);
 	}
 
@@ -123,13 +128,6 @@ public class WikiBagServlet extends HttpServlet
 			String userp = request.getParameter("user");
 			String passwordp = request.getParameter("password");
 			
-			WikiPage page = wikiEngine.getPage(pageName);
-
-			if (page == null)
-			{
-				page = new WikiPage(wikiEngine, pageName);
-			}
-
 			String[] up = {userp, passwordp};
 			
 			if (userp ==null || passwordp == null)
@@ -137,8 +135,7 @@ public class WikiBagServlet extends HttpServlet
 				up = parseUserPassword(request);
 			}
 			
-
-			AuthenticationManager authenticationManager = wikiEngine.getAuthenticationManager();
+			AuthenticationManager authenticationManager = wikiEngine.getManager(AuthenticationManager.class);
 
 			if (authenticationManager.isContainerAuthenticated())
 			{
@@ -149,6 +146,16 @@ public class WikiBagServlet extends HttpServlet
 					log.info("login failed for " + up[0], e);
 					throw new WikiSecurityException("Authentication failed");
 				}
+			}
+
+			PageManager pageManager = wikiEngine.getManager(PageManager.class);
+			
+			Page page = pageManager.getPage(pageName);
+
+			if (page == null)
+			{
+				page = Wiki.contents().page(wikiEngine, pageName);
+				page.setAuthor(userp);
 			}
 			
 			WikiContext context = new WikiContext(wikiEngine, request, page);
@@ -175,7 +182,6 @@ public class WikiBagServlet extends HttpServlet
 				}
 			}
 			
-			
 
 //			WikiContext context = new WikiContext(wikiEngine, request, page);
 //			
@@ -190,8 +196,8 @@ public class WikiBagServlet extends HttpServlet
 //				throw new WikiSecurityException("Authentication failed");
 //			}
 
-			AuthorizationManager authorizationManager = wikiEngine.getAuthorizationManager();
-
+			AuthorizationManager authorizationManager = wikiEngine.getManager(AuthorizationManager.class);
+			
 			boolean isAllowed = authorizationManager.checkPermission(context.getWikiSession(),
 					PermissionFactory.getPagePermission(page, "edit"));
 
@@ -284,23 +290,27 @@ public class WikiBagServlet extends HttpServlet
 	}
 
 
-	private void addAttachment(Part part, String fileName, WikiPage page, Principal user)
+	private void addAttachment(Part part, String fileName, Page page, Principal user)
 			throws ProviderException, IOException
 	{
 		String contentType = part.getContentType();
 		long partSize = part.getSize();
+		String parentPageName = page.getName();
 
 		InputStream is = part.getInputStream();
 
-		Attachment attachment = new Attachment(wikiEngine, page.getName(), fileName);
-
+		Attachment attachment = Wiki.contents().attachment(wikiEngine, parentPageName, fileName);
+		
 		attachment.setAuthor(user.getName());
 
 		attachment.setSize(partSize);
 
-		wikiEngine.getAttachmentManager().storeAttachment(attachment, is);
+		AttachmentManager attachmentManager = wikiEngine.getManager(AttachmentManager.class);
+		
+		attachmentManager.storeAttachment(attachment, is);
 
-		Attachment attachmentInfo = wikiEngine.getAttachmentManager()
+		
+		Attachment attachmentInfo = attachmentManager
 				.getAttachmentInfo(page.getName() + "/" + fileName);
 
 		int version = attachmentInfo.getVersion();
@@ -311,13 +321,15 @@ public class WikiBagServlet extends HttpServlet
 	private void addContent(WikiContext wikiContext, String content) throws WikiException
 	{
 
-		WikiPage page = wikiContext.getPage();
+		PageManager pageManager = wikiEngine.getManager(PageManager.class);
 
-		String pureText = wikiEngine.getPureText(page);
+		Page page = pageManager.getPage(pageName);
+
+		String pureText = pageManager.getPureText(page);
 
 		pureText = content + '\n' + pureText;
-
-		wikiEngine.saveText(wikiContext, pureText);
+		
+		pageManager.saveText(wikiContext, pureText);
 	}
 
 }

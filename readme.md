@@ -12,7 +12,7 @@ add the Wikibag jar to the JSPWiki in WEB-INF/lib and add the Servlet to JSPWiki
        <servlet-name>wikibag</servlet-name>
        <servlet-class>de.jwi.jspwiki.wikibag.WikiBagServlet</servlet-class>
 	   <multipart-config/>		
-    </servlet
+    </servlet>
     
      <servlet-mapping>
         <servlet-name>wikibag</servlet-name>
