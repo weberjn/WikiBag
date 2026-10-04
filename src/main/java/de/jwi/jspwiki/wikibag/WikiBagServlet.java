@@ -18,32 +18,26 @@
  */
 package de.jwi.jspwiki.wikibag;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.PrintWriter;
-import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.Principal;
 import java.text.MessageFormat;
-import java.util.Base64;
-import java.util.Base64.Decoder;
+import java.util.Collection;
 import java.util.Date;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Properties;
-
-import javax.servlet.ServletConfig;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServlet;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import javax.servlet.http.Part;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.apache.wiki.WikiContext;
-import org.apache.wiki.WikiEngine;
-import org.apache.wiki.WikiSession;
 import org.apache.wiki.api.core.Attachment;
+import org.apache.wiki.api.core.Context;
+import org.apache.wiki.api.core.Engine;
 import org.apache.wiki.api.core.Page;
+import org.apache.wiki.api.core.Session;
 import org.apache.wiki.api.exceptions.ProviderException;
 import org.apache.wiki.api.exceptions.WikiException;
 import org.apache.wiki.api.spi.Wiki;
@@ -54,11 +48,17 @@ import org.apache.wiki.auth.WikiSecurityException;
 import org.apache.wiki.auth.permissions.PermissionFactory;
 import org.apache.wiki.pages.PageManager;
 
+import jakarta.servlet.ServletConfig;
+import jakarta.servlet.ServletContext;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.Part;
+
 public class WikiBagServlet extends HttpServlet
 {
 	private static final Logger log = LogManager.getLogger(WikiBagServlet.class);
-
-	private WikiEngine wikiEngine;
 
 	private MessageFormat textFormat;
 	
@@ -76,14 +76,36 @@ public class WikiBagServlet extends HttpServlet
 
 	private String pageName;
 
+	private Enumeration<String> headerNames;
+
+	private String header;
+
+	private File tempDir;
+
+	private Engine engine;
+
+	private AuthenticationManager authenticationManager;
+
+	private AuthorizationManager authorizationManager;
+
+	private PageManager pageManager;
+
+	private AttachmentManager attachmentManager;
+	
+	
+
 	@Override
 	public void init(ServletConfig config) throws ServletException
 	{
 		String s; 
 		
-		wikiEngine = WikiEngine.getInstance(config);
+		ServletContext servletContext = config.getServletContext();
 		
-		Properties wikiProperties = wikiEngine.getWikiProperties();
+		tempDir = (File)servletContext.getAttribute(ServletContext.TEMPDIR); 
+		
+		engine = Wiki.engine().find(config);
+		
+		Properties wikiProperties = engine.getWikiProperties();
 
 		pageName = wikiProperties.getProperty("de.jwi.WikiBag.page", DEFAULT_PAGE);
 
@@ -99,237 +121,206 @@ public class WikiBagServlet extends HttpServlet
 
 		attachmentFormat = MessageFormatFactory.createMessageFormat(s);
 		
-		AuthenticationManager authenticationManager = wikiEngine.getManager(AuthenticationManager.class);
+		authenticationManager = engine.getManager(AuthenticationManager.class);
+		
+		authorizationManager = engine.getManager(AuthorizationManager.class);
+		
+		pageManager = engine.getManager(PageManager.class);
+		
+		attachmentManager = engine.getManager(AttachmentManager.class);
 		
 		boolean containerAuthenticated = authenticationManager.isContainerAuthenticated();		
 		log.info("containerAuthenticated: " + containerAuthenticated);
 	}
 
 	@Override
-	public void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException
-	{
-		String s = request.getContextPath() + request.getServletPath();
-		PrintWriter out = response.getWriter();
-		out.print("<html><body>");
-		out.print("Wikibag: <p>");
-		out.print("<form action='" + s + "' method='post'>");
-		out.print("text: <input type='text' name='text' /> <p>");
-		out.print("user: <input type='text' name='user' /> <p>");  
-		out.print("pass: <input type='password ' name='password' /> <p>");  
-		out.print("<input type='submit' value='post' />");  
-		out.print("</form></body></html>");  				
-	}
-
-	@Override
 	public void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException
 	{
-		try
+		log.info("doPost()");
+		
+		String shareInfo = "";
+		
+		if (request.getContentType() != null
+				&& request.getContentType().toLowerCase().indexOf("multipart/form-data") > -1)
 		{
-			String userp = request.getParameter("user");
-			String passwordp = request.getParameter("password");
+			Collection<Part> parts = request.getParts();
+			int n = parts.size();
 			
-			String[] up = {userp, passwordp};
+			Map<String, String> textContent = new HashMap<>();
 			
-			if (userp ==null || passwordp == null)
+			for (Part part : parts)
 			{
-				up = parseUserPassword(request);
-			}
-			
-			AuthenticationManager authenticationManager = wikiEngine.getManager(AuthenticationManager.class);
-
-			if (authenticationManager.isContainerAuthenticated())
-			{
-				String remoteUser = request.getRemoteUser();
-				try {
-					request.login(up[0], up[1]);
-				} catch (ServletException e) {
-					log.info("login failed for " + up[0], e);
-					throw new WikiSecurityException("Authentication failed");
-				}
-			}
-
-			PageManager pageManager = wikiEngine.getManager(PageManager.class);
-			
-			Page page = pageManager.getPage(pageName);
-
-			if (page == null)
-			{
-				page = Wiki.contents().page(wikiEngine, pageName);
-				page.setAuthor(userp);
-			}
-			
-			WikiContext context = new WikiContext(wikiEngine, request, page);
-
-			boolean loginOK = false;
-			
-			if (authenticationManager.isContainerAuthenticated())
-			{
-				// checks for container authenticated request
+				String name = part.getName();
+				String contentType = part.getContentType();
 				
-				loginOK = authenticationManager.login(request);
-				// always false, Bug
-			}
-			else
-			{
-				WikiSession wikiSession = context.getWikiSession();
-
-				// this always authenticates against UserDatabaseLoginModule
-				loginOK = authenticationManager.login(wikiSession, request, up[0], up[1]);
-				if (!loginOK)
+				if ("text/plain".equals(contentType))
 				{
-					log.info("Authentication failed for: " + up[0]);
-					throw new WikiSecurityException("Authentication failed");
-				}
-			}
-			
+					String s = null;
+					try(InputStream is = part.getInputStream())
+					{
+					    s = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+					}
 
-//			WikiContext context = new WikiContext(wikiEngine, request, page);
-//			
-//			WikiSession wikiSession = context.getWikiSession();
-//			
-//			AuthenticationManager authenticationManager = wikiEngine.getAuthenticationManager();
-//			
-//			boolean loginOK = authenticationManager.login(wikiSession, request, up[0], up[1]);
-//			if (!loginOK)
-//			{
-//				log.info("Authentication failed for: " + up[0]);
-//				throw new WikiSecurityException("Authentication failed");
-//			}
-
-			AuthorizationManager authorizationManager = wikiEngine.getManager(AuthorizationManager.class);
-			
-			boolean isAllowed = authorizationManager.checkPermission(context.getWikiSession(),
-					PermissionFactory.getPagePermission(page, "edit"));
-
-			if (!isAllowed)
-			{
-				log.info("no edit permission for: " + up[0]);
-				throw new WikiSecurityException("no edit permission");
-			}
-
-			Principal user = context.getCurrentUser();
-
-			if (request.getContentType() != null
-					&& request.getContentType().toLowerCase().indexOf("multipart/form-data") > -1)
-			{
-
-				for (Part part : request.getParts())
-				{
-					String name = part.getName();
-					String contentType = part.getContentType();
-					log.info(name);
-
-					String disposition = part.getHeader("Content-Disposition");
-					String fileName = disposition.replaceFirst("(?i)^.*filename=\"?([^\"]+)\"?.*$", "$1");
-
-					addAttachment(part, fileName, page, user);
-
-					Object[] messageArgs = { fileName, new Date() };
-					String content = attachmentFormat.format(messageArgs);
-					addContent(context, content);
-				}
-			} 
-			else
-			{
-				String content; 
-				
-				String charset = request.getCharacterEncoding() != null ? request.getCharacterEncoding() : StandardCharsets.ISO_8859_1.name();
-				
-				String text = request.getParameter("text");
-
-				text = URLDecoder.decode(text, charset);
-				log.info("doPost: text=" + text);
-
-				if (text.startsWith("http://") || text.startsWith("https://"))
-				{
-					String subject = request.getParameter("subject");
-					log.info("doPost: subject=" + subject);
-
-					subject = subject != null ? subject : "";
+					log.info("part: " + name + ": " +s);
 					
-					Object[] messageArgs = { subject, text, new Date() };
+					textContent.put(name, s);
+				}
+				else
+				{
+					// image/jpeg and everything else specified in manifest.json
+					
+					long size = part.getSize();
+					String submittedFileName = part.getSubmittedFileName();
+					
+					try 
+					{
+						Attachment attachment = addAttachment(request, part);
+						
+						Object[] messageArgs = { submittedFileName, new Date() };
+						String content = attachmentFormat.format(messageArgs);
+						addContent(request, content);
+						
+						shareInfo = String.format("%s %d bytes", attachment.toString(), size);
+						
+					} 
+					catch (WikiException | IOException e) 
+					{
+						throw new ServletException(e);
+					}
+					
+					log.info(submittedFileName);
+				}
+			}
+			
+			if (textContent.size() == 2)
+			{
+				String contentName = textContent.get("name");
+				String contentDescription = textContent.get("description");
+				
+				String content = null;
+				
+				if (contentDescription.startsWith("http://") || contentDescription.startsWith("https://"))
+				{
+					Object[] messageArgs = { contentName, contentDescription, new Date() };
 					content = urlFormat.format(messageArgs);
 				}
 				else
 				{
-					Object[] messageArgs = { text, new Date() };
+					Object[] messageArgs = { contentDescription, new Date() };
 					content = textFormat.format(messageArgs);
+				}					
+				
+				try 
+				{
+					addContent(request, content);
+				} 
+				catch (WikiException e) 
+				{
+					throw new ServletException(e);
 				}
-				addContent(context, content);
+				
+				shareInfo = contentDescription;
 			}
+
 		} 
-		catch (WikiSecurityException e)
-		{
-			response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
-		}
-		catch (WikiException e)
-		{
-			throw new ServletException(e);
-		}
+
+		response.setContentType("text/html");
+		response.getWriter().write("share to page " + pageName + " sucess. " + shareInfo);
+
 	}
 
-	private String[] parseUserPassword(HttpServletRequest request) throws WikiSecurityException
+	private Page getAuthorizedPage(HttpServletRequest request) throws WikiSecurityException
 	{
-		String authHeader = request.getHeader("Authorization");
+		String remoteUser = request.getRemoteUser();
+		
+		// make RemoteUser known to Wiki
+		authenticationManager.login(request);
+		
+		Session session = Wiki.session().find(engine, request);
+		
+		Page page = pageManager.getPage(pageName);
 
-		String BASIC_PREFIX = "Basic ";
-
-		if (authHeader == null || !authHeader.startsWith(BASIC_PREFIX))
+		if (page == null)
 		{
-			throw new WikiSecurityException("Require Basic Auth");
+			page = Wiki.contents().page(engine, pageName);
+		}
+		
+		Context context = Wiki.context().create(engine, request, page);
+		
+		Principal user = context.getCurrentUser();
+
+		boolean isAllowed = authorizationManager.checkPermission(context.getWikiSession(),
+				PermissionFactory.getPagePermission(page, "edit"));
+
+		if (!isAllowed)
+		{
+			log.info("no edit permission for: " + user.getName());
+			throw new WikiSecurityException("no edit permission");
 		}
 
-		String userPassBase64 = authHeader.substring(BASIC_PREFIX.length());
-		Decoder decoder = Base64.getDecoder();
-		byte[] decode = decoder.decode(userPassBase64);
-		String userPass = new String(decode); // => user:pass
-
-		String[] s = userPass.split(":");
-
-		return s;
+		return page;
 	}
 
-
-	private void addAttachment(Part part, String fileName, Page page, Principal user)
-			throws ProviderException, IOException
+	private void addContent(HttpServletRequest request, String content) throws WikiException
 	{
+		Page page = getAuthorizedPage(request);
+		
+		Context context = Wiki.context().create(engine, request, page);
+		
+		Principal user = context.getCurrentUser();
+		
+		page.setAuthor(user.getName());
+		
+		String pureText = pageManager.getPureText(page);
+
+		pureText = content + '\n' + pureText;
+		
+		pageManager.saveText(context, pureText);
+	}
+	
+	
+	private Attachment addAttachment(HttpServletRequest request, Part part)
+			throws ProviderException, IOException, WikiSecurityException
+	{
+		Page page = getAuthorizedPage(request);
+		
+		Context context = Wiki.context().create(engine, request, page);
+		
+		Principal user = context.getCurrentUser();
+		
+		boolean isAllowed = authorizationManager.checkPermission(context.getWikiSession(),
+				PermissionFactory.getPagePermission(page, "edit"));
+
+		if (!isAllowed)
+		{
+			log.info("no edit permission for: " + user.getName());
+			throw new WikiSecurityException("no edit permission");
+		}
+		
+		
 		String contentType = part.getContentType();
 		long partSize = part.getSize();
-		String parentPageName = page.getName();
+		
+		String submittedFileName = part.getSubmittedFileName();
+		
+		
+		String attachmentPageName = page.getName();
 
 		InputStream is = part.getInputStream();
 
-		Attachment attachment = Wiki.contents().attachment(wikiEngine, parentPageName, fileName);
+		Attachment attachment = Wiki.contents().attachment(engine, attachmentPageName, submittedFileName);
 		
 		attachment.setAuthor(user.getName());
 
 		attachment.setSize(partSize);
 
-		AttachmentManager attachmentManager = wikiEngine.getManager(AttachmentManager.class);
-		
 		attachmentManager.storeAttachment(attachment, is);
 
 		
 		Attachment attachmentInfo = attachmentManager
-				.getAttachmentInfo(page.getName() + "/" + fileName);
-
-		int version = attachmentInfo.getVersion();
-
-		log.info(version + "");
-	}
-
-	private void addContent(WikiContext wikiContext, String content) throws WikiException
-	{
-
-		PageManager pageManager = wikiEngine.getManager(PageManager.class);
-
-		Page page = pageManager.getPage(pageName);
-
-		String pureText = pageManager.getPureText(page);
-
-		pureText = content + '\n' + pureText;
+				.getAttachmentInfo(page.getName() + "/" + submittedFileName);
 		
-		pageManager.saveText(wikiContext, pureText);
+		return attachmentInfo;
 	}
 
 }
