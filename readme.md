@@ -16,6 +16,8 @@ This will only work if this is a valid https site.
 
 Chrome might immediately offer to install it. If not, use the install option of the Android three dots menu.
 Then in the Android apps list should be a Wikibag icon. Also it should appear in the list of send targets.
+
+Uninstall: from Settings - Apps
 	
 # Test
 
