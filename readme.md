@@ -12,13 +12,18 @@ open in Chrome
 
 https://your.host/JSPWiki/wikibag.html
 
-and install it.  
-	
-# test
+This will only work if this is a valid https site.
 
-Share an URL or an image to WikiBag
+Chrome might immediately offer to install it. If not, use the install option of the Android three dots menu.
+Then in the Android apps list should be a Wikibag icon. Also it should appear in the list of send targets.
+	
+# Test
+
+Share an URL, a text selection or an image to WikiBag.
 
 The WikiBag wiki page should now contain the URL and an image attachment.
+
+The WikiBag accepts all the file types in the files list of src/main/resources/META-INF/resources/manifest.json
 
 
 # License
