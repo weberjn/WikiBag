@@ -6,6 +6,8 @@ Creates a Web Share Target to send URLs, Texts and Images to the Wiki page WikiB
 
 add the Wikibag jar to the JSPWiki in WEB-INF/lib
 
+Enable container-managed authentication in jspwiki WEB-INF/web.xml
+
 # Android Installion
 
 open in Chrome
